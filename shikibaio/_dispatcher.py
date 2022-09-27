@@ -11,57 +11,33 @@ from shikibaio.types import Event
 
 
 class Dispatcher:
-    def __init__(
-        self,
-        api: Optional[Shikimori] = None,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
-    ) -> None:
-        self._loop = loop
+    def __init__(self, api: Optional[Shikimori] = None) -> None:
+        self._restricted_mode = api is None
         self._api = api
-        self._faye = Faye("wss://faye-v2.shikimori.one/") if api is not None else None
+        self._faye = (
+            Faye("wss://faye-v2.shikimori.one/") if not self._restricted_mode else None
+        )
         self._scheduled_subscriptions: List[str] = []
         self._handlers: List[Handler] = []
 
-    @property
-    def closed(self) -> bool:
-        if self._api is None or self._faye is None:
-            return True
-        return self._faye.closed and self._api.closed
-
-    async def open(self) -> "Dispatcher":
-        if self._api is not None and self._faye is not None:
-            if self._loop is None:
-                self._loop = asyncio.get_running_loop()
-            self._faye._loop = self._loop
-
-            await self._api.open()
-            await self._faye.open()
-
-        return self
-
-    async def close(self) -> None:
-        if self._api is not None and self._faye is not None:
-            await self._api.close()
-            await self._faye.close()
-
-    async def __aenter__(self) -> "Dispatcher":
-        return await self.open()
-
-    async def __aexit__(self, *args) -> None:
-        await self.close()
-
     def run(self) -> None:
-        if not self.closed or self._api == None:
-            return
-
         async def runner():
-            async with self:
+            try:
+                if not self._restricted_mode:
+                    self._faye._loop = asyncio.get_running_loop()
+                    await self._api.open()
+                    await self._faye.open()
+
                 for subscription in self._scheduled_subscriptions:
                     await self._faye.subscribe(subscription)
 
                 async for message in self._faye:
                     event = await Event.create(self._api, message)
                     await self._notify_handlers(event)
+            finally:
+                if not self._restricted_mode:
+                    await self._api.close()
+                    await self._faye.close()
 
         try:
             asyncio.run(runner())

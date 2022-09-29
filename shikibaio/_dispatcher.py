@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from aiocometd import Client as Faye
 from shiki4py import Shikimori
@@ -19,6 +19,9 @@ class Dispatcher:
         )
         self._scheduled_subscriptions: List[str] = []
         self._handlers: List[Handler] = []
+        self._listeners: Dict[
+            str, List[Tuple[asyncio.Future, Callable[..., bool]]]
+        ] = {}
 
     def run(self) -> None:
         async def runner():
@@ -45,12 +48,64 @@ class Dispatcher:
             pass
 
     async def _notify_handlers(self, event: Event) -> None:
+        event_type = event.event_type
+        if isinstance(event_type, EventType):
+            event_type = event_type.value
+
+        listeners = self._listeners.get(event_type)
+        if listeners:
+            removed = []
+            for i, (future, condition) in enumerate(listeners):
+                if future.cancelled():
+                    removed.append(i)
+                    continue
+
+                try:
+                    result = condition(event)
+                except Exception as exc:
+                    future.set_exception(exc)
+                    removed.append(i)
+                else:
+                    if result:
+                        future.set_result(event)
+                        removed.append(i)
+
+            if len(removed) == len(listeners):
+                self._listeners.pop(event_type)
+            else:
+                for idx in reversed(removed):
+                    del listeners[idx]
+
         for handler in self._handlers:
             if await handler.filter(event):
                 await handler.handle(event)
 
                 if handler.blocking:
                     break
+
+    async def wait_for(
+        self,
+        event: Union[str, EventType],
+        check: Optional[Callable[..., bool]] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        future = asyncio.get_running_loop().create_future()
+
+        if check is None:
+            check = lambda e: True
+
+        if isinstance(event, EventType):
+            event = event.value
+
+        try:
+            listeners = self._listeners[event]
+        except KeyError:
+            listeners = []
+            self._listeners[event] = listeners
+
+        listeners.append((future, check))
+
+        return asyncio.wait_for(future, timeout)
 
     def event_handler(self, *filters: Filter, blocking: bool = True):
         def decorator(callback):

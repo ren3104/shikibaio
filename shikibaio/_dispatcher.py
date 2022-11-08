@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from aiocometd import Client as Faye
 from shiki4py import Shikimori
@@ -83,12 +83,12 @@ class Dispatcher:
                 if handler.blocking:
                     break
 
-    async def wait_for(
+    def wait_for(
         self,
         event: Union[str, EventType],
         check: Optional[Callable[..., bool]] = None,
         timeout: Optional[float] = None,
-    ) -> Any:
+    ) -> Awaitable[Event]:
         future = asyncio.get_running_loop().create_future()
 
         if check is None:

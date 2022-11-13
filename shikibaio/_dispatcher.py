@@ -1,87 +1,117 @@
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import Awaitable, Callable, Coroutine, List, Optional, Union
 
 from aiocometd import Client as Faye
 from shiki4py import Shikimori
 
-from shikibaio.enums import DataType, EventType
-from shikibaio.filters import DataTypeFilter, EventTypeFilter, Filter
-from shikibaio.handler import Handler
+from shikibaio.enums import EventType
+from shikibaio.handlers import Handler, IterHandler
 from shikibaio.types import Event
 
 
 class Dispatcher:
-    def __init__(self, api: Optional[Shikimori] = None) -> None:
-        self._restricted_mode = api is None
+    def __init__(self, api: Shikimori, prefixes: List[str] = ["!", "/"]) -> None:
         self._api = api
-        self._faye = (
-            Faye("wss://faye-v2.shikimori.one/") if not self._restricted_mode else None
-        )
-        self._scheduled_subscriptions: List[str] = []
-        self._handlers: List[Handler] = []
-        self._listeners: Dict[
-            str, List[Tuple[asyncio.Future, Callable[..., bool]]]
-        ] = {}
+        self._faye = Faye("wss://faye-v2.shikimori.one/")
+
+        self._prefixes = prefixes
+
+        self._startup_handlers: List[Coroutine] = []
+        self._event_handlers: List[Handler] = []
+
+    async def _startup(self) -> None:
+        for handler in self._startup_handlers:
+            await handler
+
+    async def _runner(self) -> None:
+        try:
+            self._faye._loop = asyncio.get_running_loop()
+            await self._api.open()
+            await self._faye.open()
+
+            await self._startup()
+
+            async for message in self._faye:
+                event = await Event.create(self._api, message)
+                print(event)
+                await self._notify_handlers(event)
+        finally:
+            await self._api.close()
+            await self._faye.close()
 
     def run(self) -> None:
-        async def runner():
-            try:
-                if not self._restricted_mode:
-                    self._faye._loop = asyncio.get_running_loop()
-                    await self._api.open()
-                    await self._faye.open()
-
-                for subscription in self._scheduled_subscriptions:
-                    await self._faye.subscribe(subscription)
-
-                async for message in self._faye:
-                    event = await Event.create(self._api, message)
-                    await self._notify_handlers(event)
-            finally:
-                if not self._restricted_mode:
-                    await self._api.close()
-                    await self._faye.close()
-
         try:
-            asyncio.run(runner())
+            asyncio.run(self._runner())
         except KeyboardInterrupt:
             pass
 
     async def _notify_handlers(self, event: Event) -> None:
-        event_type = event.event_type
-        if isinstance(event_type, EventType):
-            event_type = event_type.value
+        for handler in self._event_handlers:
+            if event.event_type == handler.event_type and handler.check(event):
+                if callable(handler.callback):
+                    await handler.callback(event)
+                elif isinstance(handler.callback, asyncio.Future):
+                    if not handler.callback.cancelled():
+                        handler.callback.set_result(event)
+                    self._event_handlers.remove(handler)
+                elif isinstance(handler.callback, IterHandler):
+                    if not handler.callback.is_finished():
+                        handler.callback._events.append(event)
+                    else:
+                        self._event_handlers.remove(handler)
 
-        listeners = self._listeners.get(event_type)
-        if listeners:
-            removed = []
-            for i, (future, condition) in enumerate(listeners):
-                if future.cancelled():
-                    removed.append(i)
-                    continue
+    def subscribe_topic(self, topic_id: int, is_user_topic: bool = False) -> None:
+        commentable_type = "user" if is_user_topic else "topic"
+        self._startup_handlers.append(
+            self._faye.subscribe(f"/{commentable_type}-{topic_id}")
+        )
 
-                try:
-                    result = condition(event)
-                except Exception as exc:
-                    future.set_exception(exc)
-                    removed.append(i)
-                else:
-                    if result:
-                        future.set_result(event)
-                        removed.append(i)
+    def command(
+        self,
+        commands: Union[List[str], str],
+        ignore_case: bool = True,
+        event: Union[str, EventType] = EventType.NEW,
+    ):
+        def decorator(callback):
+            nonlocal commands, event
 
-            if len(removed) == len(listeners):
-                self._listeners.pop(event_type)
-            else:
-                for idx in reversed(removed):
-                    del listeners[idx]
+            if not any([callback == h.callback for h in self._event_handlers]):
+                if isinstance(commands, str):
+                    commands = [commands]
 
-        for handler in self._handlers:
-            if await handler.filter(event):
-                await handler.handle(event)
+                commands = list(map(str.lower, commands)) if ignore_case else commands
 
-                if handler.blocking:
-                    break
+                if isinstance(event, str):
+                    try:
+                        event = EventType(event)
+                    except ValueError:
+                        pass
+
+                def cmd_check(e: Event) -> bool:
+                    if e.event_type != event:
+                        return False
+
+                    text = e.text.lower() if ignore_case else e.text
+
+                    cmd_prefix = None
+                    for prefix in self._prefixes:
+                        if text.startswith(prefix):
+                            cmd_prefix = prefix
+                            break
+
+                    if cmd_prefix == None:
+                        return False
+
+                    if text.lstrip(cmd_prefix) in commands:
+                        return True
+
+                    return False
+
+                self._event_handlers.append(Handler(event, callback, cmd_check))
+
+            return callback
+
+        return decorator
 
     def wait_for(
         self,
@@ -92,45 +122,36 @@ class Dispatcher:
         future = asyncio.get_running_loop().create_future()
 
         if check is None:
-            check = lambda e: True
+            check = lambda _: True
 
-        if isinstance(event, EventType):
-            event = event.value
+        if isinstance(event, str):
+            try:
+                event = EventType(event)
+            except ValueError:
+                pass
 
-        try:
-            listeners = self._listeners[event]
-        except KeyError:
-            listeners = []
-            self._listeners[event] = listeners
-
-        listeners.append((future, check))
+        self._event_handlers.append(Handler(event, future, check))
 
         return asyncio.wait_for(future, timeout)
 
-    def event_handler(self, *filters: Filter, blocking: bool = True):
-        def decorator(callback):
-            if callback not in self._handlers:
-                self._handlers.append(Handler(callback, filters, blocking))
+    def iter_wait_for(
+        self,
+        event: Union[str, EventType],
+        check: Optional[Callable[..., bool]] = None,
+        number: Optional[int] = None,
+        timeout: Optional[int] = None,
+    ) -> IterHandler:
+        if check is None:
+            check = lambda _: True
 
-            return callback
+        if isinstance(event, str):
+            try:
+                event = EventType(event)
+            except ValueError:
+                pass
 
-        return decorator
+        iter_handler = IterHandler(number, timeout)
 
-    def topic_handler(self, *filters: Filter, blocking: bool = True):
-        def decorator(callback):
-            if callback not in self._handlers:
-                topic_filters = (
-                    EventTypeFilter(EventType.NEW),
-                    DataTypeFilter(DataType.COMMENT),
-                )
-                self._handlers.append(
-                    Handler(callback, topic_filters + filters, blocking)
-                )
+        self._event_handlers.append(Handler(event, iter_handler, check))
 
-            return callback
-
-        return decorator
-
-    def subscribe_topic(self, topic_id: int, is_user_topic: bool = False) -> None:
-        commentable_type = "user" if is_user_topic else "topic"
-        self._scheduled_subscriptions.append(f"/{commentable_type}-{topic_id}")
+        return iter_handler

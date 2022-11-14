@@ -25,7 +25,7 @@ pip install -U shikibaio
 | [<img src="https://raw.githubusercontent.com/ren3104/Shiki4py/main/assets/shiki4py_logo_v2.jpg" alt="shiki4py" height="50">](https://github.com/ren3104/Shiki4py) | [Shiki4py](https://github.com/ren3104/Shiki4py) | >=2.1.0 |
 
 Если вы разработчик и хотите добавить свой клиет в эту таблицу, то можете сделать это несколькими способами:
-1. Добавить [сюда](https://github.com/ren3104/shikibaio/tree/dev/shikibaio/adapt_clients) файл с классом переопределившим методы класса [BaseAdapt](https://github.com/ren3104/shikibaio/blob/dev/shikibaio/adapt_clients/base.py) и добавить себя в таблицу выше.
+1. Добавить [сюда](https://github.com/ren3104/shikibaio/tree/main/shikibaio/adapt_clients) файл с классом переопределившим методы класса [BaseAdapt](https://github.com/ren3104/shikibaio/blob/main/shikibaio/adapt_clients/base.py) и добавить себя в таблицу выше.
 2. Написать мне в shikimori ([тык](https://shikimori.one/Ren3104)), чтобы я помог с этим.
 
 ## Пример эхо бота

@@ -1,17 +1,17 @@
 import asyncio
-from typing import Awaitable, Callable, Coroutine, List, Optional, Union
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Union
 
 from aiocometd import Client as Faye
-from shiki4py import Shikimori
 
+from shikibaio.adapt_clients import get_adapt_client
 from shikibaio.enums import EventType
 from shikibaio.handlers import Handler, IterHandler
 from shikibaio.types import Event
 
 
 class Dispatcher:
-    def __init__(self, api: Shikimori, prefixes: List[str] = ["!", "/"]) -> None:
-        self._api = api
+    def __init__(self, api_client: Any, prefixes: List[str] = ["!", "/"]) -> None:
+        self._adapt_client = get_adapt_client(api_client)
         self._faye = Faye("wss://faye-v2.shikimori.one/")
 
         self._prefixes = prefixes
@@ -26,17 +26,17 @@ class Dispatcher:
     async def _runner(self) -> None:
         try:
             self._faye._loop = asyncio.get_running_loop()
-            await self._api.open()
+            await self._adapt_client.open()
             await self._faye.open()
 
             await self._startup()
 
             async for message in self._faye:
-                event = await Event.create(self._api, message)
+                event = await Event.create(self._adapt_client, message)
                 print(event)
                 await self._notify_handlers(event)
         finally:
-            await self._api.close()
+            await self._adapt_client.close()
             await self._faye.close()
 
     def run(self) -> None:

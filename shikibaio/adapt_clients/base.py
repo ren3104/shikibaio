@@ -8,10 +8,10 @@ class BaseAdapt:
     async def close(self) -> None:
         raise NotImplementedError
 
-    async def my_info(self) -> Dict[str, Any]:
+    async def my_info(self) -> Any:
         raise NotImplementedError
 
-    async def get_comment(self, comment_id: int) -> Dict[str, Any]:
+    async def get_comment(self, comment_id: int) -> Any:
         raise NotImplementedError
 
     async def create_comment(
@@ -21,5 +21,8 @@ class BaseAdapt:
         commentable_type: str,
         is_offtopic: bool = False,
         broadcast: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> Any:
         raise NotImplementedError
+
+    def to_dict(self, model: Any) -> Dict[str, Any]:
+        return model

@@ -6,7 +6,7 @@ from aiocometd import Client as Faye
 from shikibaio.adapt_clients import get_adapt_client
 from shikibaio.enums import EventType
 from shikibaio.handlers import Handler, IterHandler
-from shikibaio.types import Event
+from shikibaio.types import Event, create_event
 
 
 class Dispatcher:
@@ -32,8 +32,7 @@ class Dispatcher:
             await self._startup()
 
             async for message in self._faye:
-                event = await Event.create(self._adapt_client, message)
-                print(event)
+                event = await create_event(self._adapt_client, message)
                 await self._notify_handlers(event)
         finally:
             await self._adapt_client.close()

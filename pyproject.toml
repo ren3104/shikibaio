@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "shikibaio"
-version = "0.1.0a0"
+version = "0.1.0b0"
 description = "Asynchronous bot development framework for shikimori."
 authors = ["ren3104 <2ren3104@gmail.com>"]
 license = "MIT"

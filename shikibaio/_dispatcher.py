@@ -65,6 +65,14 @@ class Dispatcher:
             self._faye.subscribe(f"/{commentable_type}-{topic_id}")
         )
 
+    def on_event(self, event: Union[str, EventType] = EventType.NEW):
+        def decorator(callback):
+            self._event_handlers.append(Handler(event, callback, lambda _: True))
+
+            return callback
+
+        return decorator
+
     def command(
         self,
         commands: Union[List[str], str],

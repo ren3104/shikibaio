@@ -55,7 +55,7 @@ class Dispatcher:
                     self._event_handlers.remove(handler)
                 elif isinstance(handler.callback, IterHandler):
                     if not handler.callback.is_finished():
-                        handler.callback._events.append(event)
+                        await handler.callback.put(event)
                     else:
                         self._event_handlers.remove(handler)
 

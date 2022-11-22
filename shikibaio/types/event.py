@@ -59,10 +59,8 @@ async def create_event(adapt_client: BaseAdapt, raw: Dict[str, Any]) -> Event:
         kwargs["user_id"] = raw["data"]["user_id"]
 
         if event_type != EventType.DELETE:
-            kwargs["data"] = adapt_client.to_dict(
-                await adapt_client.get_comment(kwargs["data_id"])
-            )
-            kwargs["text"] = kwargs["data"]["body"]
+            kwargs["data"] = await adapt_client.get_comment(kwargs["data_id"])
+            kwargs["text"] = adapt_client.to_dict(kwargs["data"])["body"]
         else:
             kwargs["data"] = None
             kwargs["text"] = ""
